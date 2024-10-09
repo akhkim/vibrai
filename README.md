@@ -1,9 +1,6 @@
-# Real-time Internal Audio Translate & Transcriber
+# Music to Music Synthesis Model Training Program
 
-**Vibrai** is a Music to Music synthesis GAN training program, 
-
-This script can recognize the volume of the recording, allowing the user to leave out the background noise and focus on louder sound if desired.
-It also can automatically detect **57** different languages that Whisper model supports, and translate them into **134** different languages that Google Translate supports.
+**Vibrai** is a Music to Music synthesis GAN training program, which trains a GAN based on the audio files in the "tracks" folder to synthesize audio file, similar to the files it is trained on. 
 
 ## Requirements
 - Python 3.8 or greater
