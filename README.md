@@ -1,4 +1,4 @@
-# Music to Music Synthesis Model Training Program
+# Music to Music Synthesis Model Trainer
 
 **Vibrai** is a Music to Music synthesis GAN training program, which trains a GAN based on the audio files in the "tracks" folder to synthesize audio file, similar to the files it is trained on. 
 
