@@ -26,9 +26,5 @@ python3 train.py
 ```
 
 ## To be Implemented
-- Overlay of Transcribed Text
-- Speech to Translated Speech Function
-- Simple GUI
-- Optimizing Memory Usage
-- Increased Translation Accuracy
-- Faster Translation / Transcription
+- Diffusion model for higher stability and output quality for larger sample size
+- Function to choose synthesized audio length
