@@ -1,34 +1,95 @@
-import numpy as np
-from tensorflow import keras
+import os
+import torch
+import torch.nn as nn
+from torch.utils.data import DataLoader, TensorDataset
+from train import MaskedGenerator, MaskedDiscriminator, prepare_audio, PerceptualLoss, compute_gradient_penalty, mel_spectrogram_to_music, save_audio
 
 
-def load_and_train_gan(dataset, additional_epochs=1000, batch_size=32):
-    # Load the pre-trained models
-    generator = keras.models.load_model('generator_model.h5')
-    discriminator = keras.models.load_model('discriminator_model.h5')
-    gan = keras.models.load_model('gan_model.h5')
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
+
+def load_models(model_dir='saved_models'):
+    generator = MaskedGenerator(latent_dim=512, max_length=512).to(device)
+    discriminator = MaskedDiscriminator().to(device)
     
-    # Further train the models
-    for epoch in range(additional_epochs):
-        real_samples = dataset[np.random.randint(0, dataset.shape[0], batch_size)]
-        noise = np.random.normal(0, 1, (batch_size, 100))
-        generated_samples = generator.predict(noise)
-        
-        d_loss_real = discriminator.train_on_batch(real_samples, np.ones((batch_size, 1)))
-        d_loss_fake = discriminator.train_on_batch(generated_samples, np.zeros((batch_size, 1)))
-        d_loss = 0.5 * (d_loss_real + d_loss_fake)
-        
-        noise = np.random.normal(0, 1, (batch_size, 100))
-        g_loss = gan.train_on_batch(noise, np.ones((batch_size, 1)))
-        
-        if epoch % 100 == 0:
-            print(f"Epoch {epoch}, D Loss: {d_loss}, G Loss: {g_loss}")
+    generator.load_state_dict(torch.load(os.path.join(model_dir, 'generator.pth')))
+    discriminator.load_state_dict(torch.load(os.path.join(model_dir, 'discriminator.pth')))
     
-    # Save the further trained models
-    generator.save('generator_model.h5')
-    discriminator.save('discriminator_model.h5')
-    gan.save('gan_model.h5')
+    return generator, discriminator
+
+def fine_tune(generator, discriminator, specs, lengths, num_epochs=1000, batch_size=32, lr=0.0001):
+    perceptual_loss = PerceptualLoss().to(device)
+    optimizer_G = torch.optim.Adam(generator.parameters(), lr=lr, betas=(0.5, 0.9))
+    optimizer_D = torch.optim.Adam(discriminator.parameters(), lr=lr, betas=(0.5, 0.9))
+
+    dataset = TensorDataset(specs, lengths)
+    dataloader = DataLoader(dataset, batch_size=batch_size, shuffle=True)
+
+    for epoch in range(num_epochs):
+        for i, (real_specs, real_lengths) in enumerate(dataloader):
+            batch_size = real_specs.size(0)
+            real_specs = real_specs.to(device)
+            real_lengths = real_lengths.to(device)
+
+            # Train Discriminator
+            optimizer_D.zero_grad()
+            
+            noise = torch.randn(batch_size, generator.latent_dim, device=device)
+            fake_specs = generator(noise, real_lengths)
+            
+            real_validity = discriminator(real_specs, real_lengths)
+            fake_validity = discriminator(fake_specs.detach(), real_lengths)
+            
+            gradient_penalty = compute_gradient_penalty(discriminator, real_specs, fake_specs.detach(), real_lengths)
+            
+            d_loss = -torch.mean(real_validity) + torch.mean(fake_validity) + 10 * gradient_penalty
+            d_loss.backward()
+            optimizer_D.step()
+
+            # Train Generator
+            if i % 5 == 0:
+                optimizer_G.zero_grad()
+                
+                gen_specs = generator(noise, real_lengths)
+                fake_validity = discriminator(gen_specs, real_lengths)
+                
+                # Compute perceptual loss
+                real_features = perceptual_loss(real_specs.repeat(1, 3, 1, 1))
+                fake_features = perceptual_loss(gen_specs.repeat(1, 3, 1, 1))
+                p_loss = sum(torch.mean((real - fake) ** 2) for real, fake in zip(real_features, fake_features))
+                
+                g_loss = -torch.mean(fake_validity) + 0.1 * p_loss
+                g_loss.backward()
+                optimizer_G.step()
+
+        if (epoch + 1) % 10 == 0:
+            print(f"Epoch [{epoch+1}/{num_epochs}], D_loss: {d_loss.item():.4f}, G_loss: {g_loss.item():.4f}")
+
+    return generator, discriminator
+
+def generate_sample(generator, max_length=512):
+    with torch.no_grad():
+        sample_noise = torch.randn(1, generator.latent_dim, device=device)
+        sample_length = torch.tensor([max_length], device=device)
+        sample_spec = generator(sample_noise, sample_length)
+    
+    audio, sr = mel_spectrogram_to_music(sample_spec.squeeze().cpu())
+    return audio, sr
 
 
-dataset = ...
-load_and_train_gan(dataset)
+if __name__ == "__main__":
+    # Load pre-trained models
+    generator, discriminator = load_models()
+    
+    # Prepare new data for fine-tuning
+    new_specs, new_lengths = prepare_audio()
+    
+    # Fine-tune the models
+    generator, discriminator = fine_tune(generator, discriminator, new_specs, new_lengths)
+    
+    # Save fine-tuned models
+    torch.save(generator.state_dict(), 'saved_models/fine_tuned_generator.pth')
+    torch.save(discriminator.state_dict(), 'saved_models/fine_tuned_discriminator.pth')
+    
+    # Generate a sample using the fine-tuned model
+    audio, sr = generate_sample(generator)
+    save_audio(audio, sr, "fine_tuned_sample.wav")

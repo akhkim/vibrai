@@ -2,6 +2,6 @@ import os
 
 dir = os.getcwd()
 output = os.path.join(dir, "tracks")
-playlist = ""
+playlist_link = ""
 
-os.system("spotdl " + playlist + " --output " + output)
+os.system("spotdl " + playlist_link + " --output " + output)

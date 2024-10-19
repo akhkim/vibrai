@@ -1,26 +1,34 @@
-import librosa
-import numpy as np
+import os
+import torch
 import soundfile as sf
-from tensorflow import keras
+from train import MaskedGenerator, mel_spectrogram_to_music
 
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-def spectrogram_to_audio(spectrogram, sr=22050, n_iter=10):
-    spec_linear = librosa.db_to_power(spectrogram)
-    audio_signal = librosa.griffinlim(spec_linear, n_iter=n_iter)
-    
-    return audio_signal
+def load_generator(model_path, latent_dim=512, max_length=512):
+    generator = MaskedGenerator(latent_dim=latent_dim, max_length=max_length).to(device)
+    generator.load_state_dict(torch.load(model_path, map_location=device))
+    generator.eval()
+    return generator
 
-def save_audio(audio_signal, filename, sr=22050):
-    sf.write(filename, audio_signal, sr)
+def generate_mel_spectrogram(generator, latent_dim=512, max_length=512):
+    with torch.no_grad():
+        noise = torch.randn(1, latent_dim, device=device)
+        length = torch.tensor([max_length], device=device)
+        mel_spec = generator(noise, length)
+    return mel_spec.squeeze().cpu()
 
+def save_audio(y, sr, filename="generated_music.wav"):
+    sf.write(filename, y, sr)
+    print(f"Audio saved as {filename}")
 
-generator = keras.models.load_model('generator_model.h5')
-discriminator = keras.models.load_model('discriminator_model.h5')
-gan = keras.models.load_model('gan_model.h5')
+def main():
+    model_path = os.path.join('saved_models', 'generator.pth')
+    generator = load_generator(model_path)
+    mel_spec = generate_mel_spectrogram(generator)
+    audio, sr = mel_spectrogram_to_music(mel_spec)
+    save_audio(audio, sr, "generated_music.wav")
 
-# Generate new music
-noise = np.random.normal(0, 1, (1, 100))
-generated_spectrogram = generator.predict(noise)
-
-audio = spectrogram_to_audio(generated_spectrogram[0])
-save_audio(audio, 'generated_audio.wav')
+if __name__ == "__main__":
+    main()
+    print("Music generation complete!")
